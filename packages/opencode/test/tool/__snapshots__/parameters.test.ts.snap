@@ -20,6 +20,10 @@ exports[`tool parameters JSON Schema (wire shape) bash 1`] = `
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "background": {
+      "description": "Run the command in the background and return immediately with a shell_id. Use for long-running commands (dev servers, watchers, long builds) so you can keep working; read incremental output later with the bash_output tool. Background commands have no timeout unless one is set explicitly.",
+      "type": "boolean",
+    },
     "command": {
       "description": "The command to execute",
       "type": "string",
@@ -141,7 +145,7 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "character": {
-      "description": "The character offset (1-based, as shown in editors)",
+      "description": "The character offset (1-based, as shown in editors). Required for position-based operations.",
       "maximum": 9007199254740991,
       "minimum": 1,
       "type": "integer",
@@ -151,7 +155,7 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
       "type": "string",
     },
     "line": {
-      "description": "The line number (1-based, as shown in editors)",
+      "description": "The line number (1-based, as shown in editors). Required for position-based operations.",
       "maximum": 9007199254740991,
       "minimum": 1,
       "type": "integer",
@@ -168,6 +172,7 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
         "prepareCallHierarchy",
         "incomingCalls",
         "outgoingCalls",
+        "diagnostics",
       ],
       "type": "string",
     },
@@ -179,8 +184,6 @@ exports[`tool parameters JSON Schema (wire shape) lsp 1`] = `
   "required": [
     "operation",
     "filePath",
-    "line",
-    "character",
   ],
   "type": "object",
 }
@@ -312,6 +315,17 @@ exports[`tool parameters JSON Schema (wire shape) task 1`] = `
     "description": {
       "description": "A short (3-5 words) description of the task",
       "type": "string",
+    },
+    "isolation": {
+      "description": "Set to "worktree" to run the subagent in a fresh git worktree so its edits cannot touch the main checkout — use when several editing subagents run in parallel or the work is risky. A clean worktree is removed automatically; one with changes is kept and reported with its branch so you can merge it.",
+      "enum": [
+        "worktree",
+      ],
+      "type": "string",
+    },
+    "output_schema": {
+      "description": "Optional JSON Schema for the subagent's final result. When set, the subagent is forced to return a result matching this schema and the task output is that JSON object — use it when you need typed data back instead of prose.",
+      "type": "object",
     },
     "prompt": {
       "description": "The task for the agent to perform",

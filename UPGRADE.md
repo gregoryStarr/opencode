@@ -34,8 +34,9 @@ Recommended baseline env for this fork's users:
 ```sh
 export OPENCODE_EXPERIMENTAL_PLAN_MODE=true
 export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
-export OPENCODE_EXPERIMENTAL_LSP_TOOL=true
 export OPENCODE_ENABLE_QUESTION_TOOL=true
+# LSP tool and websearch are on by default in this fork
+# (OPENCODE_DISABLE_LSP_TOOL / OPENCODE_DISABLE_WEBSEARCH opt out).
 ```
 
 and in `opencode.json`:
@@ -132,17 +133,48 @@ No new tools, no schema — plain files the user can read and edit.
    out" section (concurrent task calls, self-contained subagent prompts,
    delegate noisy exploration); `task.txt` documents `output_schema` (note 8).
 
-## Phase 3 — planned (context & lifecycle)
+## Phase 3 — context & lifecycle
 
-1. **Soft compaction threshold** — `session/overflow.ts:22-34` triggers only
-   at the hard ceiling; add `compaction.threshold` (e.g. 0.85) so compaction
-   runs with headroom.
-2. **Structured compaction** — preserve files-touched / decisions / open todos
-   as distinct sections across the boundary (`session/compaction.ts`).
-3. **Hooks** — pre/post tool-call and session lifecycle hooks beyond the
-   current plugin seams.
-4. **Worktree isolation for subagents** — absent upstream (verified); build on
-   `snapshot/`.
+1. **Soft compaction threshold — shipped.** `compaction.threshold` config
+   (default 0.9): auto-compaction triggers at that fraction of the usable
+   window instead of the hard ceiling (`session/overflow.ts`,
+   `core/v1/config/config.ts`).
+2. **Structured compaction — shipped (fork delta only).** Upstream's
+   `buildPrompt` already emits a sectioned template (Goal / Progress / Key
+   Decisions / Next Steps / Relevant Files) — the original audit predated it.
+   The fork adds the missing piece: the live todo list is read from the todo
+   store and injected into the compaction prompt as authoritative context, so
+   open work survives the boundary even when todowrite outputs were pruned
+   (`session/compaction.ts`).
+3. **Hooks — shipped.** Config-declared shell-command hooks (`hooks` in
+   opencode.json), Claude-Code style, no JS plugin needed. Implemented as the
+   built-in `ConfigHooksPlugin` layered on the existing plugin trigger seams:
+   `tool.execute.before` (exit code 2 blocks the call, stderr goes to the
+   model), `tool.execute.after` (stdout appended to tool output), `event`
+   (fire-and-forget on bus events). Each command gets a JSON payload on stdin;
+   `matcher` is a regex on tool id / event type; per-hook `timeout` (default
+   60s). Files: `core/v1/config/hooks.ts`, `opencode/src/plugin/config-hooks.ts`,
+   tests in `test/plugin/config-hooks.test.ts`.
+4. **Worktree isolation for subagents — shipped.** `isolation: "worktree"` on
+   the task tool runs the subagent against a fresh git worktree at
+   `.opencode/worktrees/task-<id>` (branch `opencode/task/<id>`,
+   auto-added to `.git/info/exclude`). Enforcement is two-layered:
+   - **Permissions (hard):** the child session gets `edit: deny *` +
+     `edit: allow <worktree>/*` appended last — `Permission.evaluate` is
+     last-match-wins, so edit/write/patch outside the worktree are denied.
+   - **Prompt (steering):** a preamble tells the subagent its working
+     directory, to use absolute paths under it, and to pass
+     `workdir=<worktree>` on shell commands (bash cwd cannot be hard-forced
+     without instance surgery — the honest remaining gap; see below).
+   On completion (foreground or background) the worktree is inspected: clean →
+   removed and branch deleted; dirty or committed → kept, and the task output
+   gains a `<task_worktree>` block with path, branch, and change counts so the
+   parent can merge. Files: `tool/task-worktree.ts`, `tool/task.ts`; tests in
+   `test/tool/task-worktree.test.ts`.
+   Known limitation: shell commands that ignore the prompt's `workdir`
+   instruction still run in the main checkout's cwd; fixing that requires the
+   session-scoped cwd override through `InstanceState` (instance-per-worktree),
+   left as the one remaining architectural follow-up.
 
 ---
 
