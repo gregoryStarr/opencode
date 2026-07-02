@@ -60,6 +60,16 @@ Execute shell commands in your project environment.
 
 This tool allows the LLM to run terminal commands like `npm install`, `git status`, or any other shell command.
 
+Pass `background: true` to launch a long-running command (dev server, watcher, long build) without blocking. It returns immediately with a `shell_id`; the model reads incremental output later with the `bash_output` tool. Background commands have no timeout unless one is set explicitly.
+
+---
+
+### bash_output
+
+Read incremental output from a background command started with `bash` (`background: true`).
+
+Given the `shell_id`, it returns only the output produced since the previous call plus the command's current status (running/completed/error/cancelled). Pass `kill: true` to terminate a running background command.
+
 ---
 
 ### edit
@@ -151,12 +161,12 @@ Search for files using glob patterns like `**/*.js` or `src/**/*.ts`. Returns ma
 
 ---
 
-### lsp (experimental)
+### lsp
 
-Interact with your configured LSP servers to get code intelligence features like definitions, references, hover info, and call hierarchy.
+Interact with your configured LSP servers to get code intelligence features like definitions, references, hover info, call hierarchy, and diagnostics.
 
 :::note
-This tool is only available when `OPENCODE_EXPERIMENTAL_LSP_TOOL=true` (or `OPENCODE_EXPERIMENTAL=true`).
+This tool is on by default in this build. Set `OPENCODE_DISABLE_LSP_TOOL=true` to turn it off.
 :::
 
 ```json title="opencode.json" {4}
@@ -168,7 +178,7 @@ This tool is only available when `OPENCODE_EXPERIMENTAL_LSP_TOOL=true` (or `OPEN
 }
 ```
 
-Supported operations include `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, and `outgoingCalls`.
+Supported operations include `goToDefinition`, `findReferences`, `hover`, `documentSymbol`, `workspaceSymbol`, `goToImplementation`, `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`, and `diagnostics`. The `diagnostics` operation returns the current errors and warnings for a file, so the model can verify an edit compiles cleanly without re-running a full build. `documentSymbol`, `workspaceSymbol`, and `diagnostics` do not require `line`/`character`.
 
 To configure which LSP servers are available for your project, see [LSP Servers](/docs/lsp).
 
@@ -257,14 +267,7 @@ Allows the LLM to fetch and read web pages. Useful for looking up documentation 
 Search the web for information.
 
 :::note
-This tool is only available when using the OpenCode provider or when the `OPENCODE_ENABLE_EXA` environment variable is set to any truthy value (e.g., `true` or `1`).
-
-To enable when launching OpenCode:
-
-```bash
-OPENCODE_ENABLE_EXA=1 opencode
-```
-
+This tool is available for **every provider** in this build (the Exa and Parallel search backends are public). Set `OPENCODE_DISABLE_WEBSEARCH=true` to turn it off. Choose a backend with `OPENCODE_WEBSEARCH_PROVIDER=exa|parallel`; supply `EXA_API_KEY` / `PARALLEL_API_KEY` for higher limits (optional).
 :::
 
 ```json title="opencode.json" {4}
@@ -276,9 +279,9 @@ OPENCODE_ENABLE_EXA=1 opencode
 }
 ```
 
-Performs web searches using Exa AI to find relevant information online. Useful for researching topics, finding current events, or gathering information beyond the training data cutoff.
+Performs web searches using Exa or Parallel to find relevant information online. Useful for researching topics, finding current events, or gathering information beyond the training data cutoff.
 
-No API key is required — the tool connects directly to Exa AI's hosted MCP service without authentication.
+No API key is required by default — the tool connects directly to the hosted MCP search service without authentication.
 
 :::tip
 Use `websearch` when you need to find information (discovery), and `webfetch` when you need to retrieve content from a specific URL (retrieval).

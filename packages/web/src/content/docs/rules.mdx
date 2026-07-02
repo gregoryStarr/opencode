@@ -104,6 +104,19 @@ The first matching file wins in each category. For example, if you have both `AG
 
 ---
 
+## Persistent memory
+
+Where `AGENTS.md` holds instructions **you** author, a `MEMORY.md` file holds durable facts the agent maintains **across sessions** on its own — decisions, preferences, and corrections you share over time.
+
+When present, these files are auto-loaded into the system prompt:
+
+- **Global**: `~/.config/opencode/MEMORY.md`
+- **Per project**: `<project>/.opencode/MEMORY.md`
+
+The agent is instructed to update them with the normal edit/write tools when you share something worth remembering (one short fact per bullet), and to keep them small and current. They are plain Markdown — read and edit them yourself any time. Nothing is stored automatically without the model choosing to; there is no separate memory database or schema.
+
+---
+
 ## Custom Instructions
 
 You can specify custom instruction files in your `opencode.json` or the global `~/.config/opencode/opencode.json`. This allows you and your team to reuse existing rules rather than having to duplicate them to AGENTS.md.

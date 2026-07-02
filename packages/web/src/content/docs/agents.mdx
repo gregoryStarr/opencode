@@ -36,13 +36,13 @@ look at these below.
 
 Subagents are specialized assistants that primary agents can invoke for specific tasks. You can also manually invoke them by **@ mentioning** them in your messages.
 
-OpenCode comes with three built-in subagents, **General**, **Explore**, and **Scout**. We'll look at this below.
+OpenCode comes with four built-in subagents, **General**, **Explore**, **Scout**, and **Oracle**. We'll look at this below.
 
 ---
 
 ## Built-in
 
-OpenCode comes with two built-in primary agents and three built-in subagents.
+OpenCode comes with two built-in primary agents and four built-in subagents.
 
 ---
 
@@ -92,6 +92,14 @@ A read-only agent for external docs and dependency research. Use this when you n
 
 ---
 
+### Use oracle
+
+_Mode_: `subagent`
+
+A read-only reviewer and verifier for high-stakes judgment calls. It can read, search, run read-only commands, and query LSP, but cannot edit files — so its conclusions are safe to request at any point. Use it to review a diff or design for correctness, adversarially verify that a claimed fix or finding is real, or answer a hard technical question with evidence. Its prompt biases it toward refuting claims and reporting a verdict with the exact file/line and a concrete failure scenario.
+
+---
+
 ### Use compaction
 
 _Mode_: `primary`
@@ -136,6 +144,16 @@ Hidden system agent that creates session summaries. It runs automatically and is
    - `session_parent` (default: **Up**) to return to the parent session
 
    This lets you switch between the main conversation and specialized subagent work.
+
+---
+
+## Task options
+
+When a primary agent delegates to a subagent (the `task` tool), it can request:
+
+- **Typed output** — pass a JSON Schema as `output_schema` and the subagent is forced to return a result matching it. The task result is the JSON object, so the parent gets structured data instead of parsing prose. Ideal for fan-out where each subagent returns findings you process programmatically.
+- **Background execution** — pass `background: true` to launch the subagent asynchronously and get notified when it finishes, so the primary agent can keep working.
+- **Worktree isolation** — pass `isolation: "worktree"` to run an editing subagent against a fresh git worktree (`.opencode/worktrees/task-<id>` on branch `opencode/task/<id>`). Its edits cannot touch the main checkout. A clean worktree is removed automatically; one with changes is kept and reported with its branch so you can merge it. Use it when several editing subagents run in parallel or the work is risky. Requires a git repository.
 
 ---
 
