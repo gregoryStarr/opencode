@@ -29,6 +29,8 @@ export class Service extends ConfigService.Service<Service>()("@opencode/Runtime
     direct: bool("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"),
   }).pipe(Config.map((flags) => flags.broad || flags.direct)),
   disableSharedPrinciples: bool("OPENCODE_DISABLE_SHARED_PRINCIPLES"),
+  disableLspTool: bool("OPENCODE_DISABLE_LSP_TOOL"),
+  disableWebsearch: bool("OPENCODE_DISABLE_WEBSEARCH"),
   enableExa: Config.all({
     experimental,
     enabled: bool("OPENCODE_ENABLE_EXA"),

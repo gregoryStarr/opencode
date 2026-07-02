@@ -49,6 +49,10 @@ const BaseParameterFields = {
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
+  output_schema: Schema.optional(Schema.Record(Schema.String, Schema.Any)).annotate({
+    description:
+      "Optional JSON Schema for the subagent's final result. When set, the subagent is forced to return a result matching this schema and the task output is that JSON object — use it when you need typed data back instead of prose.",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -194,8 +198,20 @@ export const TaskTool = Tool.define(
           },
           variant: next.model ? undefined : variant,
           agent: next.name,
+          format: params.output_schema ? { type: "json_schema", schema: params.output_schema, retryCount: 2 } : undefined,
           parts,
         })
+        if (params.output_schema) {
+          if (result.info.role === "assistant" && result.info.structured !== undefined) {
+            return JSON.stringify(result.info.structured, null, 2)
+          }
+          return yield* Effect.fail(
+            new Error(
+              "Subagent did not produce structured output matching the requested output_schema. " +
+                `Last text: ${result.parts.findLast((item) => item.type === "text")?.text ?? "(none)"}`,
+            ),
+          )
+        }
         return result.parts.findLast((item) => item.type === "text")?.text ?? ""
       })
 

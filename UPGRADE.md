@@ -101,23 +101,36 @@ No new tools, no schema — plain files the user can read and edit.
 
 ---
 
-## Phase 2 — planned (tools & subagents)
+## Phase 2 — shipped on branch `fable-harness-phase2`
 
-1. **Structured subagent output** — thread the existing json_schema/
-   StructuredOutput machinery (`session/prompt.ts:1242-1248`) through
-   `tool/task.ts` so a parent can request typed results instead of parsing the
-   subagent's last text part (`task.ts:199`).
-2. **Background shell** — `run_in_background` param on `tool/shell.ts` +
-   an output-polling tool, reusing `background/job.ts` (currently used only by
-   TaskTool).
-3. **Un-gate LSP tool by default** in the fork and add a `diagnostics`
-   operation (`tool/lsp.ts:11-21` has 9 ops but no diagnostics).
-4. **Pluggable web search** — relax the provider gate (`registry.ts:55-57`,
-   `268-270`) to allow any configured search backend.
-5. **Oracle/reviewer subagent** — a read-only high-reasoning verification
-   agent alongside build/plan/general/explore (`agent/agent.ts:140-265`).
-6. **Parallel fan-out guidance** — provider prompts + task.txt should state
-   that multiple `task` calls in one message run concurrently.
+1. **Structured subagent output** — `task` tool now accepts `output_schema`
+   (JSON Schema). The subagent run is forced through the existing
+   StructuredOutput machinery (`format: json_schema` on the child prompt) and
+   the task result is the typed JSON object; a subagent that fails to produce
+   schema-conformant output fails the task with the last text attached
+   (`tool/task.ts`).
+2. **Background shell** — `background: true` param on the `bash` tool starts
+   the command as a BackgroundJob and returns a `shell_id` immediately; new
+   `bash_output` tool serves incremental reads (delta since last call) and
+   `kill: true` termination. Output buffers are capped at 2 MB per shell / 32
+   shells with tail-eviction (`tool/shell.ts`, `tool/shell-output.ts`). Tests
+   in `test/tool/shell.test.ts` ("tool.shell background").
+3. **LSP on by default + diagnostics** — LSP tool no longer gated behind
+   `OPENCODE_EXPERIMENTAL_LSP_TOOL`; opt out with `OPENCODE_DISABLE_LSP_TOOL`.
+   New `diagnostics` operation returns current errors/warnings for a file
+   (pull-based via `LSP.Service.diagnostics()`); `line`/`character` are now
+   optional and validated per-operation (`tool/lsp.ts`, `tool/registry.ts`).
+4. **Web search for every provider** — the opencode-provider gate is gone
+   (both Exa and Parallel MCP endpoints are public; keys optional via
+   `EXA_API_KEY` / `PARALLEL_API_KEY`). Opt out with
+   `OPENCODE_DISABLE_WEBSEARCH`; backend override still
+   `OPENCODE_WEBSEARCH_PROVIDER` (`tool/registry.ts:webSearchEnabled`).
+5. **Oracle subagent** — read-only, adversarial reviewer/verifier agent
+   (grep/glob/read/bash/webfetch/websearch/lsp, no edits) with a
+   refute-by-default prompt (`agent/agent.ts`, `agent/prompt/oracle.txt`).
+6. **Parallel fan-out guidance** — `principles.txt` gained a "Delegate and fan
+   out" section (concurrent task calls, self-contained subagent prompts,
+   delegate noisy exploration); `task.txt` documents `output_schema` (note 8).
 
 ## Phase 3 — planned (context & lifecycle)
 

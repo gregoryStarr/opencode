@@ -8,6 +8,7 @@ import path from "path"
 import { Config } from "@/config/config"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellTool } from "../../src/tool/shell"
+import { ShellOutputTool } from "../../src/tool/shell-output"
 import { Filesystem } from "@/util/filesystem"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import type { Permission } from "../../src/permission"
@@ -21,6 +22,7 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { BackgroundJob } from "@/background/job"
 
 const shellLayer = Layer.mergeAll(
   LayerNode.compile(
@@ -32,6 +34,7 @@ const shellLayer = Layer.mergeAll(
       Config.node,
       Agent.node,
       RuntimeFlags.node,
+      BackgroundJob.node,
     ]),
   ),
   testInstanceStoreLayer,
@@ -1193,6 +1196,58 @@ describe("tool.shell truncation", () => {
         expect(lines.length).toBe(lineCount)
         expect(lines[0]).toBe("1")
         expect(lines[lineCount - 1]).toBe(String(lineCount))
+      }),
+    ),
+  )
+})
+
+describe("tool.shell background", () => {
+  it.live("runs in background and streams output through bash_output", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const bash = yield* initShell()
+        const started = yield* bash.execute({ command: "echo bg-hello", background: true }, ctx)
+        const shellId = (started.metadata as { shellId?: string }).shellId
+        expect(shellId).toBeTruthy()
+        expect(started.output).toContain("bash_output")
+
+        const background = yield* BackgroundJob.Service
+        const waited = yield* background.wait({ id: shellId! })
+        expect(waited.info?.status).toBe("completed")
+
+        const outputTool = yield* Effect.flatMap(ShellOutputTool, (info) => info.init())
+        const read = yield* outputTool.execute({ shell_id: shellId! }, ctx)
+        expect(read.output).toContain("bg-hello")
+        expect(read.output).toContain('status="completed"')
+
+        // Buffer is freed once a finished shell is fully read; a second read
+        // still succeeds via the job registry but has no new output.
+        const second = yield* outputTool.execute({ shell_id: shellId! }, ctx)
+        expect(second.output).toContain("(no new output)")
+      }),
+    ),
+  )
+
+  it.live("kill terminates a running background command", () =>
+    runIn(
+      projectRoot,
+      Effect.gen(function* () {
+        const bash = yield* initShell()
+        const started = yield* bash.execute(
+          { command: `${bin} -e ${evalarg("setInterval(() => console.log('tick'), 50)")}`, background: true },
+          ctx,
+        )
+        const shellId = (started.metadata as { shellId?: string }).shellId
+        expect(shellId).toBeTruthy()
+
+        const outputTool = yield* Effect.flatMap(ShellOutputTool, (info) => info.init())
+        const killed = yield* outputTool.execute({ shell_id: shellId!, kill: true }, ctx)
+        expect(killed.output).toContain('status="cancelled"')
+
+        const background = yield* BackgroundJob.Service
+        const info = yield* background.get(shellId!)
+        expect(info?.status).toBe("cancelled")
       }),
     ),
   )

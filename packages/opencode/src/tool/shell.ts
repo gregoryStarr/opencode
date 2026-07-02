@@ -14,6 +14,8 @@ import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellID } from "./shell/id"
+import { BackgroundJob } from "@/background/job"
+import { randomUUID } from "node:crypto"
 
 import * as Truncate from "./truncate"
 import { Plugin } from "@/plugin"
@@ -25,6 +27,22 @@ import { BashArity } from "@/permission/arity"
 export { Parameters } from "./shell/prompt"
 
 const MAX_METADATA_LENGTH = 30_000
+const BACKGROUND_BUFFER_MAX = 2_000_000
+const BACKGROUND_BUFFER_SLOTS = 32
+
+export type BackgroundShellRecord = {
+  command: string
+  output: string
+  cursor: number
+  truncated: boolean
+}
+
+/**
+ * Live output buffers for background shells, keyed by shell_id (the
+ * BackgroundJob id). The job registry owns lifecycle/status; this map only
+ * holds streamed output so bash_output can serve incremental reads.
+ */
+export const backgroundShells = new Map<string, BackgroundShellRecord>()
 const CWD = new Set(["cd", "chdir", "popd", "pushd", "push-location", "set-location"])
 const FILES = new Set([
   ...CWD,
@@ -344,6 +362,7 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const background = yield* BackgroundJob.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -627,6 +646,88 @@ export const ShellTool = Tool.define(
                   yield* ask(ctx, scan, params)
                 }),
               )
+
+              if (params.background) {
+                const env = yield* shellEnv(ctx, cwd)
+                const shellId = `shell_${randomUUID().slice(0, 8)}`
+                const record: BackgroundShellRecord = {
+                  command: params.command,
+                  output: "",
+                  cursor: 0,
+                  truncated: false,
+                }
+                // Evict oldest buffers so unread background output cannot grow unbounded.
+                while (backgroundShells.size >= BACKGROUND_BUFFER_SLOTS) {
+                  const oldest = backgroundShells.keys().next().value
+                  if (oldest === undefined) break
+                  backgroundShells.delete(oldest)
+                }
+                backgroundShells.set(shellId, record)
+                const runBackground = Effect.scoped(
+                  Effect.gen(function* () {
+                    const handle = yield* spawner.spawn(cmd(shell, params.command, cwd, env))
+                    yield* Effect.addFinalizer(() =>
+                      handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.ignore),
+                    )
+                    yield* Effect.forkScoped(
+                      Stream.runForEach(Stream.decodeText(handle.all), (chunk) =>
+                        Effect.sync(() => {
+                          record.output += chunk
+                          const over = Buffer.byteLength(record.output, "utf-8") - BACKGROUND_BUFFER_MAX
+                          if (over > 0) {
+                            record.output = record.output.slice(over)
+                            record.cursor = Math.max(0, record.cursor - over)
+                            record.truncated = true
+                          }
+                        }),
+                      ),
+                    )
+                    const events = [
+                      handle.exitCode.pipe(Effect.map((code) => ({ kind: "exit" as const, code }))),
+                      ...(params.timeout !== undefined
+                        ? [
+                            Effect.sleep(`${params.timeout} millis`).pipe(
+                              Effect.map(() => ({ kind: "timeout" as const, code: null })),
+                            ),
+                          ]
+                        : []),
+                    ]
+                    const exit = yield* Effect.raceAll(events)
+                    if (exit.kind === "timeout") {
+                      yield* handle.kill({ forceKillAfter: "3 seconds" }).pipe(Effect.orDie)
+                      return yield* Effect.fail(
+                        new Error(`Background command timed out after ${params.timeout} ms`),
+                      )
+                    }
+                    if (exit.code !== 0) {
+                      return yield* Effect.fail(new Error(`Command exited with code ${exit.code}`))
+                    }
+                    return `Command completed with exit code 0. Any unread output is available via bash_output with shell_id "${shellId}".`
+                  }),
+                )
+                yield* background.start({
+                  id: shellId,
+                  type: ShellID.ToolID,
+                  title: params.command,
+                  metadata: { command: params.command, cwd },
+                  run: runBackground,
+                })
+                return {
+                  title: params.command,
+                  metadata: {
+                    output: "",
+                    exit: null as number | null,
+                    truncated: false,
+                    background: true,
+                    shellId,
+                  },
+                  output: [
+                    `Command running in background with shell_id: ${shellId}`,
+                    "Use the bash_output tool with this shell_id to check status and read new output; pass kill=true to terminate it.",
+                    "You will NOT be notified automatically when it finishes — check its output before depending on its result, and do not poll in a tight loop.",
+                  ].join("\n"),
+                }
+              }
 
               return yield* run(
                 {

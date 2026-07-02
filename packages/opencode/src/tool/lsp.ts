@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import path from "path"
 import { LSP } from "@/lsp/lsp"
+import { Diagnostic } from "@/lsp/diagnostic"
 import DESCRIPTION from "./lsp.txt"
 import { InstanceState } from "@/effect/instance-state"
 import { pathToFileURL } from "url"
@@ -18,16 +19,19 @@ const operations = [
   "prepareCallHierarchy",
   "incomingCalls",
   "outgoingCalls",
+  "diagnostics",
 ] as const
+
+const positionless = new Set(["documentSymbol", "workspaceSymbol", "diagnostics"])
 
 export const Parameters = Schema.Struct({
   operation: Schema.Literals(operations).annotate({ description: "The LSP operation to perform" }),
   filePath: Schema.String.annotate({ description: "The absolute or relative path to the file" }),
-  line: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
-    description: "The line number (1-based, as shown in editors)",
+  line: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
+    description: "The line number (1-based, as shown in editors). Required for position-based operations.",
   }),
-  character: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).annotate({
-    description: "The character offset (1-based, as shown in editors)",
+  character: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))).annotate({
+    description: "The character offset (1-based, as shown in editors). Required for position-based operations.",
   }),
   query: Schema.optional(Schema.String).annotate({
     description: "Search query for workspaceSymbol. Empty string requests all symbols.",
@@ -47,10 +51,13 @@ export const LspTool = Tool.define(
           const instance = yield* InstanceState.context
           const file = path.isAbsolute(args.filePath) ? args.filePath : path.join(instance.directory, args.filePath)
           yield* assertExternalDirectoryEffect(ctx, file)
+          if (!positionless.has(args.operation) && (args.line === undefined || args.character === undefined)) {
+            throw new Error(`Operation ${args.operation} requires both line and character parameters`)
+          }
           const meta =
             args.operation === "workspaceSymbol"
               ? { operation: args.operation }
-              : args.operation === "documentSymbol"
+              : positionless.has(args.operation)
                 ? { operation: args.operation, filePath: file }
                 : { operation: args.operation, filePath: file, line: args.line, character: args.character }
           yield* ctx.ask({
@@ -61,12 +68,12 @@ export const LspTool = Tool.define(
           })
 
           const uri = pathToFileURL(file).href
-          const position = { file, line: args.line - 1, character: args.character - 1 }
+          const position = { file, line: (args.line ?? 1) - 1, character: (args.character ?? 1) - 1 }
           const relPath = path.relative(instance.worktree, file)
           const detail =
             args.operation === "workspaceSymbol"
               ? ""
-              : args.operation === "documentSymbol"
+              : positionless.has(args.operation)
                 ? relPath
                 : `${relPath}:${args.line}:${args.character}`
           const title = detail ? `${args.operation} ${detail}` : args.operation
@@ -78,6 +85,17 @@ export const LspTool = Tool.define(
           if (!available) throw new Error("No LSP server available for this file type.")
 
           yield* lsp.touchFile(file, "document")
+
+          if (args.operation === "diagnostics") {
+            const all = yield* lsp.diagnostics()
+            const issues = all[file] ?? []
+            return {
+              title,
+              metadata: { result: issues },
+              output:
+                issues.length === 0 ? `No diagnostics for ${relPath}` : issues.map(Diagnostic.pretty).join("\n"),
+            }
+          }
 
           const result: unknown[] = yield* (() => {
             switch (args.operation) {
