@@ -16,6 +16,7 @@ import { ConfigPluginV1 } from "./plugin"
 import { ConfigProviderV1 } from "./provider"
 import { ConfigServerV1 } from "./server"
 import { ConfigSkillsV1 } from "./skills"
+import { ConfigHooksV1 } from "./hooks"
 
 export type Layout = ConfigLayoutV1.Layout
 
@@ -42,6 +43,10 @@ export const Info = Schema.Struct({
     description: "Command configuration, see https://opencode.ai/docs/commands",
   }),
   skills: Schema.optional(ConfigSkillsV1.Info).annotate({ description: "Additional skill folder paths" }),
+  hooks: Schema.optional(ConfigHooksV1.Info).annotate({
+    description:
+      "Shell-command hooks that run on tool calls and bus events without writing a plugin. Each hook receives a JSON payload on stdin.",
+  }),
   references: Schema.optional(ConfigReference.Info).annotate({
     description: "Named git or local directory references",
   }),
@@ -160,6 +165,10 @@ export const Info = Schema.Struct({
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
+      }),
+      threshold: Schema.optional(Schema.Finite.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1))).annotate({
+        description:
+          "Fraction of the usable context window at which auto-compaction triggers (default: 0.9). Lower values compact earlier, leaving more headroom. Floored at 0.5 at runtime — values below that would compact so aggressively that the post-compaction turn re-triggers compaction in an infinite loop.",
       }),
     }),
   ),

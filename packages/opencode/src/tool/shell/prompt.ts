@@ -19,6 +19,10 @@ export function parameterSchema() {
     workdir: Schema.optional(Schema.String).annotate({
       description: `The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.`,
     }),
+    background: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Run the command in the background and return immediately with a shell_id. Use for long-running commands (dev servers, watchers, long builds) so you can keep working; read incremental output later with the bash_output tool. Background commands have no timeout unless one is set explicitly.",
+    }),
   })
 }
 
@@ -270,6 +274,12 @@ function profile(name: string, platform: NodeJS.Platform, limits: Limits, defaul
   }
 }
 
+const BACKGROUND_SECTION = `Background mode:
+  - Set background=true to launch a long-running command (dev server, watcher, long build) and return immediately with a shell_id.
+  - Read incremental output with the bash_output tool, passing that shell_id; pass kill=true to terminate the command.
+  - Do NOT poll bash_output in a tight loop. Continue with other work and check output when you have a reason to (e.g., before using the server the command starts).
+  - Background commands have no timeout unless one is set explicitly.`
+
 export function render(name: string, platform: NodeJS.Platform, limits: Limits, defaultTimeoutMs: number) {
   const selected = profile(name, platform, limits, defaultTimeoutMs)
   return {
@@ -285,7 +295,9 @@ export function render(name: string, platform: NodeJS.Platform, limits: Limits, 
       gitCommandRestriction: selected.gitCommandRestriction,
       createPrInstruction: selected.createPrInstruction,
       createPrExample: selected.createPrExample,
-    }),
+    }) +
+      "\n\n" +
+      BACKGROUND_SECTION,
     parameters: parameterSchema(),
   }
 }

@@ -420,8 +420,23 @@ describe("session.compaction.isOverflow", () => {
       Effect.gen(function* () {
         const compact = yield* SessionCompaction.Service
         const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
-        const tokens = { input: 200_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
+        // usable = 272K - 20K reserved = 252K; soft threshold 0.9 → trigger at 226.8K.
+        const tokens = { input: 180_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
         expect(yield* compact.isOverflow({ tokens, model })).toBe(false)
+      }),
+    ),
+  )
+
+  it.live(
+    "fork: soft threshold triggers compaction before the hard ceiling",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const compact = yield* SessionCompaction.Service
+        const model = createModel({ context: 400_000, input: 272_000, output: 128_000 })
+        // 230K is under the 252K hard ceiling but over 0.9 * 252K = 226.8K,
+        // so the fork compacts here to leave headroom for the next turn.
+        const tokens = { input: 200_000, output: 20_000, reasoning: 0, cache: { read: 10_000, write: 0 } }
+        expect(yield* compact.isOverflow({ tokens, model })).toBe(true)
       }),
     ),
   )

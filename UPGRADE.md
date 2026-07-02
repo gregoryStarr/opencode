@@ -11,6 +11,30 @@ All findings below were verified against that tree; paths are relative to
 
 ---
 
+## Live validation (2026-07-02, `ollama-cloud/kimi-k2.7-code`)
+
+The whole feature set was smoke-tested end-to-end against a real non-Claude
+model via `opencode run`. All five scenarios passed: basic tool loop;
+background shell + `bash_output`; subagent with `output_schema`; worktree
+isolation (child committed on `opencode/task/*`, main checkout untouched);
+todo persistence across a multi-step task. The run surfaced five real issues
+that only appear with a weaker model — all fixed and unit-tested:
+
+1. `task.ts` passed a plain object as `format`; downstream validation needs a
+   real `OutputFormatJsonSchema` instance.
+2. **Upstream bug:** `session/llm/request.ts:resolveTools` filtered out the
+   host-injected `StructuredOutput` tool for deny-by-default agents
+   (explore/oracle), so structured output silently never worked for them.
+   Now exempted.
+3. Providers that ignore `toolChoice:"required"` (ollama-cloud) need the schema
+   requirement restated in the prompt — added to the subagent preamble.
+4. A too-low `compaction.threshold` caused an infinite compaction doom loop;
+   the value is now floored at 0.5 (`overflow.ts`).
+5. `todowrite` required `priority`, which weaker models routinely omit; the
+   tool boundary now defaults it to "medium" (stored `Todo.Info` unchanged).
+
+---
+
 ## Verified current state (what upstream already has)
 
 Upstream closed several gaps during 2026 — these need no fork work, only
@@ -34,8 +58,9 @@ Recommended baseline env for this fork's users:
 ```sh
 export OPENCODE_EXPERIMENTAL_PLAN_MODE=true
 export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
-export OPENCODE_EXPERIMENTAL_LSP_TOOL=true
 export OPENCODE_ENABLE_QUESTION_TOOL=true
+# LSP tool and websearch are on by default in this fork
+# (OPENCODE_DISABLE_LSP_TOOL / OPENCODE_DISABLE_WEBSEARCH opt out).
 ```
 
 and in `opencode.json`:
@@ -101,35 +126,79 @@ No new tools, no schema — plain files the user can read and edit.
 
 ---
 
-## Phase 2 — planned (tools & subagents)
+## Phase 2 — shipped on branch `fable-harness-phase2`
 
-1. **Structured subagent output** — thread the existing json_schema/
-   StructuredOutput machinery (`session/prompt.ts:1242-1248`) through
-   `tool/task.ts` so a parent can request typed results instead of parsing the
-   subagent's last text part (`task.ts:199`).
-2. **Background shell** — `run_in_background` param on `tool/shell.ts` +
-   an output-polling tool, reusing `background/job.ts` (currently used only by
-   TaskTool).
-3. **Un-gate LSP tool by default** in the fork and add a `diagnostics`
-   operation (`tool/lsp.ts:11-21` has 9 ops but no diagnostics).
-4. **Pluggable web search** — relax the provider gate (`registry.ts:55-57`,
-   `268-270`) to allow any configured search backend.
-5. **Oracle/reviewer subagent** — a read-only high-reasoning verification
-   agent alongside build/plan/general/explore (`agent/agent.ts:140-265`).
-6. **Parallel fan-out guidance** — provider prompts + task.txt should state
-   that multiple `task` calls in one message run concurrently.
+1. **Structured subagent output** — `task` tool now accepts `output_schema`
+   (JSON Schema). The subagent run is forced through the existing
+   StructuredOutput machinery (`format: json_schema` on the child prompt) and
+   the task result is the typed JSON object; a subagent that fails to produce
+   schema-conformant output fails the task with the last text attached
+   (`tool/task.ts`).
+2. **Background shell** — `background: true` param on the `bash` tool starts
+   the command as a BackgroundJob and returns a `shell_id` immediately; new
+   `bash_output` tool serves incremental reads (delta since last call) and
+   `kill: true` termination. Output buffers are capped at 2 MB per shell / 32
+   shells with tail-eviction (`tool/shell.ts`, `tool/shell-output.ts`). Tests
+   in `test/tool/shell.test.ts` ("tool.shell background").
+3. **LSP on by default + diagnostics** — LSP tool no longer gated behind
+   `OPENCODE_EXPERIMENTAL_LSP_TOOL`; opt out with `OPENCODE_DISABLE_LSP_TOOL`.
+   New `diagnostics` operation returns current errors/warnings for a file
+   (pull-based via `LSP.Service.diagnostics()`); `line`/`character` are now
+   optional and validated per-operation (`tool/lsp.ts`, `tool/registry.ts`).
+4. **Web search for every provider** — the opencode-provider gate is gone
+   (both Exa and Parallel MCP endpoints are public; keys optional via
+   `EXA_API_KEY` / `PARALLEL_API_KEY`). Opt out with
+   `OPENCODE_DISABLE_WEBSEARCH`; backend override still
+   `OPENCODE_WEBSEARCH_PROVIDER` (`tool/registry.ts:webSearchEnabled`).
+5. **Oracle subagent** — read-only, adversarial reviewer/verifier agent
+   (grep/glob/read/bash/webfetch/websearch/lsp, no edits) with a
+   refute-by-default prompt (`agent/agent.ts`, `agent/prompt/oracle.txt`).
+6. **Parallel fan-out guidance** — `principles.txt` gained a "Delegate and fan
+   out" section (concurrent task calls, self-contained subagent prompts,
+   delegate noisy exploration); `task.txt` documents `output_schema` (note 8).
 
-## Phase 3 — planned (context & lifecycle)
+## Phase 3 — context & lifecycle
 
-1. **Soft compaction threshold** — `session/overflow.ts:22-34` triggers only
-   at the hard ceiling; add `compaction.threshold` (e.g. 0.85) so compaction
-   runs with headroom.
-2. **Structured compaction** — preserve files-touched / decisions / open todos
-   as distinct sections across the boundary (`session/compaction.ts`).
-3. **Hooks** — pre/post tool-call and session lifecycle hooks beyond the
-   current plugin seams.
-4. **Worktree isolation for subagents** — absent upstream (verified); build on
-   `snapshot/`.
+1. **Soft compaction threshold — shipped.** `compaction.threshold` config
+   (default 0.9): auto-compaction triggers at that fraction of the usable
+   window instead of the hard ceiling (`session/overflow.ts`,
+   `core/v1/config/config.ts`).
+2. **Structured compaction — shipped (fork delta only).** Upstream's
+   `buildPrompt` already emits a sectioned template (Goal / Progress / Key
+   Decisions / Next Steps / Relevant Files) — the original audit predated it.
+   The fork adds the missing piece: the live todo list is read from the todo
+   store and injected into the compaction prompt as authoritative context, so
+   open work survives the boundary even when todowrite outputs were pruned
+   (`session/compaction.ts`).
+3. **Hooks — shipped.** Config-declared shell-command hooks (`hooks` in
+   opencode.json), Claude-Code style, no JS plugin needed. Implemented as the
+   built-in `ConfigHooksPlugin` layered on the existing plugin trigger seams:
+   `tool.execute.before` (exit code 2 blocks the call, stderr goes to the
+   model), `tool.execute.after` (stdout appended to tool output), `event`
+   (fire-and-forget on bus events). Each command gets a JSON payload on stdin;
+   `matcher` is a regex on tool id / event type; per-hook `timeout` (default
+   60s). Files: `core/v1/config/hooks.ts`, `opencode/src/plugin/config-hooks.ts`,
+   tests in `test/plugin/config-hooks.test.ts`.
+4. **Worktree isolation for subagents — shipped.** `isolation: "worktree"` on
+   the task tool runs the subagent against a fresh git worktree at
+   `.opencode/worktrees/task-<id>` (branch `opencode/task/<id>`,
+   auto-added to `.git/info/exclude`). Enforcement is two-layered:
+   - **Permissions (hard):** the child session gets `edit: deny *` +
+     `edit: allow <worktree>/*` appended last — `Permission.evaluate` is
+     last-match-wins, so edit/write/patch outside the worktree are denied.
+   - **Prompt (steering):** a preamble tells the subagent its working
+     directory, to use absolute paths under it, and to pass
+     `workdir=<worktree>` on shell commands (bash cwd cannot be hard-forced
+     without instance surgery — the honest remaining gap; see below).
+   On completion (foreground or background) the worktree is inspected: clean →
+   removed and branch deleted; dirty or committed → kept, and the task output
+   gains a `<task_worktree>` block with path, branch, and change counts so the
+   parent can merge. Files: `tool/task-worktree.ts`, `tool/task.ts`; tests in
+   `test/tool/task-worktree.test.ts`.
+   Known limitation: shell commands that ignore the prompt's `workdir`
+   instruction still run in the main checkout's cwd; fixing that requires the
+   session-scoped cwd override through `InstanceState` (instance-per-worktree),
+   left as the one remaining architectural follow-up.
 
 ---
 

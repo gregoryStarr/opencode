@@ -3,8 +3,22 @@ import * as Tool from "./tool"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
 
+// Lenient tool-boundary schema: weaker models routinely omit `priority`, which
+// the shared Todo.Info requires. Default it here (to "medium") so a forgotten
+// field doesn't fail the tool call, while the stored todo still carries all
+// three fields. Kept at the LLM boundary only — Todo.Info is unchanged.
+const TodoInput = Schema.Struct({
+  content: Schema.String.annotate({ description: "Brief description of the task" }),
+  status: Schema.String.annotate({
+    description: "Current status of the task: pending, in_progress, completed, cancelled",
+  }),
+  priority: Schema.optional(Schema.String).annotate({
+    description: "Priority level of the task: high, medium, low (defaults to medium)",
+  }),
+})
+
 export const Parameters = Schema.Struct({
-  todos: Schema.mutable(Schema.Array(Todo.Info)).annotate({ description: "The updated todo list" }),
+  todos: Schema.mutable(Schema.Array(TodoInput)).annotate({ description: "The updated todo list" }),
 })
 
 type Metadata = {
@@ -28,16 +42,17 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
             metadata: {},
           })
 
+          const todos = params.todos.map((item) => ({ ...item, priority: item.priority ?? "medium" }))
           yield* todo.update({
             sessionID: ctx.sessionID,
-            todos: params.todos,
+            todos,
           })
 
           return {
-            title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,
-            output: JSON.stringify(params.todos, null, 2),
+            title: `${todos.filter((x) => x.status !== "completed").length} todos`,
+            output: JSON.stringify(todos, null, 2),
             metadata: {
-              todos: params.todos,
+              todos,
             },
           }
         }),

@@ -13,6 +13,12 @@ These principles apply no matter which model is powering you. They complement th
 - While working, give a brief update when you find something important or change direction. Do not narrate every call.
 - Batch independent tool calls into a single message so they run in parallel; keep dependent calls sequential.
 
+## Delegate and fan out
+- For work with several independent parts (searching many files, investigating separate subsystems, reviewing in parallel), launch subagents with the task tool. Multiple task calls issued in a single message run concurrently — prefer one message with several task calls over launching them one at a time.
+- Give each subagent a self-contained prompt: what to do, what to return, and the exact shape of the result you expect. A subagent cannot see your conversation.
+- Delegate read-heavy or exploratory work (broad greps, log trawls, mapping an unfamiliar area) so noisy output stays out of your own context; keep only the findings.
+- Do the coherent implementation work yourself when parallel edits would touch the same files and conflict. Fan out for breadth, converge for correctness.
+
 ## Find root causes
 - Investigate until you understand why something fails before changing code. Do not patch symptoms, add sleeps, loosen assertions, or suppress errors to make things pass.
 - Never swallow errors. Surface them with enough context that the real cause is visible.

@@ -10,6 +10,7 @@ import { SessionProcessor } from "./processor"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
+import { Todo } from "./todo"
 import { NotFoundError } from "@/storage/storage"
 
 import { Effect, Layer, Context } from "effect"
@@ -164,6 +165,7 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const todo = yield* Todo.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -345,7 +347,21 @@ const layer = Layer.effect(
         { sessionID: input.sessionID },
         { context: [], prompt: undefined },
       )
-      const nextPrompt = compacting.prompt ?? buildPrompt({ previousSummary, context: compacting.context })
+      // Feed the live todo list into the summary from its source of truth so
+      // open work survives the compaction boundary even when the todowrite
+      // tool outputs were pruned or truncated out of the history.
+      const todos = yield* todo.get(input.sessionID)
+      const todoContext =
+        todos.length > 0 && todos.some((item) => item.status !== "completed")
+          ? [
+              [
+                "Authoritative current todo list (from the todo store, not the conversation). Reflect it verbatim in the Progress and Next Steps sections:",
+                ...todos.map((item) => `- [${item.status}] ${item.content}`),
+              ].join("\n"),
+            ]
+          : []
+      const nextPrompt =
+        compacting.prompt ?? buildPrompt({ previousSummary, context: [...todoContext, ...compacting.context] })
       const msgs = structuredClone(selected.head)
       yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
       const modelMessages = yield* MessageV2.toModelMessagesEffect(msgs, model, {
@@ -556,6 +572,7 @@ export const node = LayerNode.make({
     Provider.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Todo.node,
   ],
 })
 

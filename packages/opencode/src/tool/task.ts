@@ -14,6 +14,10 @@ import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@opencode-ai/core/database/database"
+import { InstanceState } from "@/effect/instance-state"
+import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { TaskWorktree } from "./task-worktree"
+import { randomUUID } from "node:crypto"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -49,6 +53,14 @@ const BaseParameterFields = {
       "This should only be set if you mean to resume a previous task (you can pass a prior task_id and the task will continue the same subagent session as before instead of creating a fresh one)",
   }),
   command: Schema.optional(Schema.String).annotate({ description: "The command that triggered this task" }),
+  output_schema: Schema.optional(Schema.Record(Schema.String, Schema.Any)).annotate({
+    description:
+      "Optional JSON Schema for the subagent's final result. When set, the subagent is forced to return a result matching this schema and the task output is that JSON object — use it when you need typed data back instead of prose.",
+  }),
+  isolation: Schema.optional(Schema.Literals(["worktree"])).annotate({
+    description:
+      "Set to \"worktree\" to run the subagent in a fresh git worktree so its edits cannot touch the main checkout — use when several editing subagents run in parallel or the work is risky. A clean worktree is removed automatically; one with changes is kept and reported with its branch so you can merge it.",
+  }),
 }
 
 const BaseParameters = Schema.Struct(BaseParameterFields)
@@ -88,6 +100,7 @@ export const TaskTool = Tool.define(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const spawner = yield* ChildProcessSpawner
 
     const run = Effect.fn("TaskTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -122,6 +135,18 @@ export const TaskTool = Tool.define(
         ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         : undefined
       const parent = yield* sessions.get(ctx.sessionID)
+
+      // Worktree isolation: create the worktree before the session so the
+      // session's permission rules can reference its path. Resumed sessions
+      // (task_id) keep whatever isolation they were created with.
+      const instance = yield* InstanceState.context
+      const isolation =
+        params.isolation === "worktree" && !session
+          ? yield* TaskWorktree.create(spawner, {
+              root: instance.worktree,
+              slug: `task-${randomUUID().slice(0, 8)}`,
+            })
+          : undefined
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -139,6 +164,18 @@ export const TaskTool = Tool.define(
           action: "deny" as const,
         })) ?? []),
       ]
+      // Isolation rules go last: Permission.evaluate is last-match-wins, so the
+      // worktree allow overrides the blanket edit deny for paths inside it.
+      const isolationRules = isolation
+        ? [
+            { permission: "edit" as const, pattern: "*" as const, action: "deny" as const },
+            {
+              permission: "edit" as const,
+              pattern: `${isolation.relative.replaceAll("\\", "/")}/*`,
+              action: "allow" as const,
+            },
+          ]
+        : []
       const nextSession =
         session ??
         (yield* sessions.create({
@@ -154,6 +191,7 @@ export const TaskTool = Tool.define(
                     rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
                 ),
             ),
+            ...isolationRules,
           ],
         }))
 
@@ -184,7 +222,35 @@ export const TaskTool = Tool.define(
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
+        const resolved = yield* ops.resolvePromptParts(params.prompt)
+        const parts = [
+          ...(isolation
+            ? [
+                {
+                  type: "text" as const,
+                  synthetic: true,
+                  text: TaskWorktree.prompt(isolation, instance.worktree),
+                },
+              ]
+            : []),
+          ...resolved,
+          // Providers that ignore toolChoice:"required" (common on OpenAI-compat
+          // gateways) need the requirement stated in the prompt itself.
+          ...(params.output_schema
+            ? [
+                {
+                  type: "text" as const,
+                  synthetic: true,
+                  text: [
+                    "<system-reminder>",
+                    "You MUST deliver your final result by calling the StructuredOutput tool with arguments matching this JSON Schema exactly. Never give your final answer as plain text — plain text will be discarded and the task will fail.",
+                    JSON.stringify(params.output_schema),
+                    "</system-reminder>",
+                  ].join("\n"),
+                },
+              ]
+            : []),
+        ]
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -194,9 +260,40 @@ export const TaskTool = Tool.define(
           },
           variant: next.model ? undefined : variant,
           agent: next.name,
+          // Must be a real OutputFormatJsonSchema instance: downstream schema
+          // validation expects the class, not a structurally-equal plain object
+          // (API callers get instances via boundary decoding; we construct directly).
+          format: params.output_schema
+            ? new SessionV1.OutputFormatJsonSchema({
+                type: "json_schema",
+                schema: params.output_schema,
+                retryCount: 2,
+              })
+            : undefined,
           parts,
         })
-        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+        const worktreeNote = isolation
+          ? yield* TaskWorktree.finish(spawner, isolation, instance.worktree).pipe(
+              Effect.map((outcome) => `\n\n<task_worktree>\n${TaskWorktree.report(isolation, outcome)}\n</task_worktree>`),
+              Effect.catch((error) =>
+                Effect.succeed(
+                  `\n\n<task_worktree>\nFailed to inspect the isolated worktree at ${isolation.directory}: ${error.message}\n</task_worktree>`,
+                ),
+              ),
+            )
+          : ""
+        if (params.output_schema) {
+          if (result.info.role === "assistant" && result.info.structured !== undefined) {
+            return JSON.stringify(result.info.structured, null, 2) + worktreeNote
+          }
+          return yield* Effect.fail(
+            new Error(
+              "Subagent did not produce structured output matching the requested output_schema. " +
+                `Last text: ${result.parts.findLast((item) => item.type === "text")?.text ?? "(none)"}`,
+            ),
+          )
+        }
+        return (result.parts.findLast((item) => item.type === "text")?.text ?? "") + worktreeNote
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (

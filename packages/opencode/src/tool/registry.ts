@@ -5,6 +5,7 @@ import { PlanExitTool } from "./plan"
 import { Session } from "@/session/session"
 import { QuestionTool } from "./question"
 import { ShellTool } from "./shell"
+import { ShellOutputTool } from "./shell-output"
 import { EditTool } from "./edit"
 import { GlobTool } from "./glob"
 import { GrepTool } from "./grep"
@@ -52,8 +53,11 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 
-export function webSearchEnabled(providerID: ProviderV2.ID, flags = { exa: false, parallel: false }) {
-  return providerID === ProviderV2.ID.opencode || flags.exa || flags.parallel
+// Fork: web search is available for every provider by default — the Exa and
+// Parallel MCP endpoints are public, so gating on the opencode provider only
+// hurt local/OSS models. OPENCODE_DISABLE_WEBSEARCH opts out entirely.
+export function webSearchEnabled(_providerID: ProviderV2.ID, flags = { disableWebsearch: false }) {
+  return !flags.disableWebsearch
 }
 
 type TaskDef = Tool.InferDef<typeof TaskTool>
@@ -98,6 +102,7 @@ const layer = Layer.effect(
     const webfetch = yield* WebFetchTool
     const websearch = yield* WebSearchTool
     const shell = yield* ShellTool
+    const shellOutput = yield* ShellOutputTool
     const globtool = yield* GlobTool
     const writetool = yield* WriteTool
     const edit = yield* EditTool
@@ -197,6 +202,7 @@ const layer = Layer.effect(
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
           shell: Tool.init(shell),
+          shellOutput: Tool.init(shellOutput),
           read: Tool.init(read),
           glob: Tool.init(globtool),
           grep: Tool.init(greptool),
@@ -219,6 +225,7 @@ const layer = Layer.effect(
             tool.invalid,
             ...(questionEnabled ? [tool.question] : []),
             tool.shell,
+            tool.shellOutput,
             tool.read,
             tool.glob,
             tool.grep,
@@ -230,7 +237,8 @@ const layer = Layer.effect(
             tool.search,
             tool.skill,
             tool.patch,
-            ...(flags.experimentalLspTool ? [tool.lsp] : []),
+            // Fork: LSP tool is on by default; OPENCODE_DISABLE_LSP_TOOL opts out.
+            ...(flags.disableLspTool ? [] : [tool.lsp]),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,
@@ -266,7 +274,7 @@ const layer = Layer.effect(
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
       const filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) {
-          return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
+          return webSearchEnabled(input.providerID, { disableWebsearch: flags.disableWebsearch })
         }
 
         const usePatch =

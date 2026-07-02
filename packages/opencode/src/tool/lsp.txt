@@ -10,9 +10,12 @@ Supported operations:
 - prepareCallHierarchy: Get call hierarchy item at a position (functions/methods)
 - incomingCalls: Find all functions/methods that call the function at a position
 - outgoingCalls: Find all functions/methods called by the function at a position
+- diagnostics: Get current errors/warnings for a file. Use after editing to verify your change compiles cleanly instead of re-running a full build.
 
 All operations require:
 - filePath: The file to operate on
+
+Position-based operations (all except documentSymbol, workspaceSymbol, and diagnostics) also require:
 - line: The line number (1-based, as shown in editors)
 - character: The character offset (1-based, as shown in editors)
 
