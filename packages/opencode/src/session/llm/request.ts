@@ -205,12 +205,18 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
   }
 })
 
-function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
+export function resolveTools(input: Pick<PrepareInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(
     Object.keys(input.tools),
     Permission.merge(input.agent.permission, input.permission ?? []),
   )
-  return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+  return Record.filter(input.tools, (_, k) => {
+    // StructuredOutput is host-injected when the caller demanded a typed
+    // result; it has no side effects and denying it just breaks the reply
+    // channel, so deny-by-default agents (explore/oracle) must not filter it.
+    if (k === "StructuredOutput") return true
+    return input.user.tools?.[k] !== false && !disabled.has(k)
+  })
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

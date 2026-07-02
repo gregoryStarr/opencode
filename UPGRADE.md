@@ -11,6 +11,30 @@ All findings below were verified against that tree; paths are relative to
 
 ---
 
+## Live validation (2026-07-02, `ollama-cloud/kimi-k2.7-code`)
+
+The whole feature set was smoke-tested end-to-end against a real non-Claude
+model via `opencode run`. All five scenarios passed: basic tool loop;
+background shell + `bash_output`; subagent with `output_schema`; worktree
+isolation (child committed on `opencode/task/*`, main checkout untouched);
+todo persistence across a multi-step task. The run surfaced five real issues
+that only appear with a weaker model — all fixed and unit-tested:
+
+1. `task.ts` passed a plain object as `format`; downstream validation needs a
+   real `OutputFormatJsonSchema` instance.
+2. **Upstream bug:** `session/llm/request.ts:resolveTools` filtered out the
+   host-injected `StructuredOutput` tool for deny-by-default agents
+   (explore/oracle), so structured output silently never worked for them.
+   Now exempted.
+3. Providers that ignore `toolChoice:"required"` (ollama-cloud) need the schema
+   requirement restated in the prompt — added to the subagent preamble.
+4. A too-low `compaction.threshold` caused an infinite compaction doom loop;
+   the value is now floored at 0.5 (`overflow.ts`).
+5. `todowrite` required `priority`, which weaker models routinely omit; the
+   tool boundary now defaults it to "medium" (stored `Todo.Info` unchanged).
+
+---
+
 ## Verified current state (what upstream already has)
 
 Upstream closed several gaps during 2026 — these need no fork work, only

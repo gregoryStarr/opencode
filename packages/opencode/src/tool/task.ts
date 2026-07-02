@@ -223,16 +223,34 @@ export const TaskTool = Tool.define(
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
         const resolved = yield* ops.resolvePromptParts(params.prompt)
-        const parts = isolation
-          ? [
-              {
-                type: "text" as const,
-                synthetic: true,
-                text: TaskWorktree.prompt(isolation, instance.worktree),
-              },
-              ...resolved,
-            ]
-          : resolved
+        const parts = [
+          ...(isolation
+            ? [
+                {
+                  type: "text" as const,
+                  synthetic: true,
+                  text: TaskWorktree.prompt(isolation, instance.worktree),
+                },
+              ]
+            : []),
+          ...resolved,
+          // Providers that ignore toolChoice:"required" (common on OpenAI-compat
+          // gateways) need the requirement stated in the prompt itself.
+          ...(params.output_schema
+            ? [
+                {
+                  type: "text" as const,
+                  synthetic: true,
+                  text: [
+                    "<system-reminder>",
+                    "You MUST deliver your final result by calling the StructuredOutput tool with arguments matching this JSON Schema exactly. Never give your final answer as plain text — plain text will be discarded and the task will fail.",
+                    JSON.stringify(params.output_schema),
+                    "</system-reminder>",
+                  ].join("\n"),
+                },
+              ]
+            : []),
+        ]
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -242,7 +260,16 @@ export const TaskTool = Tool.define(
           },
           variant: next.model ? undefined : variant,
           agent: next.name,
-          format: params.output_schema ? { type: "json_schema", schema: params.output_schema, retryCount: 2 } : undefined,
+          // Must be a real OutputFormatJsonSchema instance: downstream schema
+          // validation expects the class, not a structurally-equal plain object
+          // (API callers get instances via boundary decoding; we construct directly).
+          format: params.output_schema
+            ? new SessionV1.OutputFormatJsonSchema({
+                type: "json_schema",
+                schema: params.output_schema,
+                retryCount: 2,
+              })
+            : undefined,
           parts,
         })
         const worktreeNote = isolation

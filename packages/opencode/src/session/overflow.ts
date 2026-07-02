@@ -9,6 +9,10 @@ const COMPACTION_BUFFER = 20_000
 // Fork: compact before the hard ceiling so the compaction request itself has
 // headroom and quality does not degrade right at the limit.
 const DEFAULT_THRESHOLD = 0.9
+// Below this, the post-compaction summary + auto-continue turn can itself
+// exceed the (tiny) trigger point, so compaction fires again immediately —
+// an infinite doom loop. Floor the configured threshold to stay safe.
+const MIN_THRESHOLD = 0.5
 
 export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
@@ -33,6 +37,6 @@ export function isOverflow(input: {
 
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-  const threshold = input.cfg.compaction?.threshold ?? DEFAULT_THRESHOLD
+  const threshold = Math.max(MIN_THRESHOLD, input.cfg.compaction?.threshold ?? DEFAULT_THRESHOLD)
   return count >= usable(input) * threshold
 }

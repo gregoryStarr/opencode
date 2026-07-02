@@ -362,7 +362,7 @@ exports[`tool parameters JSON Schema (wire shape) todo 1`] = `
             "type": "string",
           },
           "priority": {
-            "description": "Priority level of the task: high, medium, low",
+            "description": "Priority level of the task: high, medium, low (defaults to medium)",
             "type": "string",
           },
           "status": {
@@ -373,7 +373,6 @@ exports[`tool parameters JSON Schema (wire shape) todo 1`] = `
         "required": [
           "content",
           "status",
-          "priority",
         ],
         "type": "object",
       },

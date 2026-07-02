@@ -168,7 +168,7 @@ export const Info = Schema.Struct({
       }),
       threshold: Schema.optional(Schema.Finite.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(1))).annotate({
         description:
-          "Fraction of the usable context window at which auto-compaction triggers (default: 0.9). Lower values compact earlier, leaving more headroom.",
+          "Fraction of the usable context window at which auto-compaction triggers (default: 0.9). Lower values compact earlier, leaving more headroom. Floored at 0.5 at runtime — values below that would compact so aggressively that the post-compaction turn re-triggers compaction in an infinite loop.",
       }),
     }),
   ),
