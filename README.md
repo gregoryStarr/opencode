@@ -45,26 +45,47 @@
 
 ### Installation
 
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+This is a **fork** with a harness tuned for non-Claude backend models (see [`UPGRADE.md`](UPGRADE.md)). It is not published to npm or Homebrew — install it from source. The upstream `opencode-ai` package and `opencode.ai/install` script install the original project, **not** this fork.
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+**Prerequisites:** [Bun](https://bun.sh) `1.3.14`+ (matches the repo's `packageManager`), Git, and Node.js (used by the `bin/opencode` launcher).
+
+```bash
+# 1. Clone
+git clone https://github.com/gregoryStarr/opencode.git
+cd opencode
+
+# 2. Install dependencies
+bun install
+
+# 3. Run from source (launches the TUI)
+bun run dev
 ```
 
+To get a global `opencode` command that tracks your local checkout:
+
+```bash
+bun link --cwd packages/opencode
+opencode        # now runs this fork
+```
+
+Or build a standalone binary for your platform:
+
+```bash
+bun run --cwd packages/opencode build
+# → packages/opencode/dist/<platform>/bin/opencode
+# copy it somewhere on your PATH, e.g.:
+cp packages/opencode/dist/*/bin/opencode ~/.local/bin/opencode
+```
+
+**Staying current:** this fork tracks upstream on the `dev` branch. Pull updates with `git pull && bun install`.
+
 > [!TIP]
-> Remove versions older than 0.1.x before installing.
+> If you previously installed upstream opencode, its binary may shadow this one — check `which opencode` and adjust your PATH so the fork wins.
 
 ### Desktop App (BETA)
+
+> [!NOTE]
+> The prebuilt desktop downloads below are from **upstream** and do not include this fork's harness changes. To run the fork's desktop build, build from source with `bun run dev:desktop`.
 
 OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
 
@@ -80,21 +101,6 @@ OpenCode is also available as a desktop application. Download directly from the 
 brew install --cask opencode-desktop
 # Windows (Scoop)
 scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
 ```
 
 ### Agents
