@@ -131,6 +131,17 @@ describe("RuntimeFlags", () => {
     }),
   )
 
+  it.effect("fork: background subagents default on, opt out via OPENCODE_DISABLE_BACKGROUND_SUBAGENTS", () =>
+    Effect.gen(function* () {
+      const on = yield* readFlags.pipe(Effect.provide(fromConfig({})))
+      expect(on.experimentalBackgroundSubagents).toBe(true)
+      const off = yield* readFlags.pipe(
+        Effect.provide(fromConfig({ OPENCODE_DISABLE_BACKGROUND_SUBAGENTS: "true" })),
+      )
+      expect(off.experimentalBackgroundSubagents).toBe(false)
+    }),
+  )
+
   it.effect("disableExternalSkills defaults to false", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(Effect.provide(fromConfig({})))

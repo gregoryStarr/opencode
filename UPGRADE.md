@@ -53,20 +53,20 @@ awareness (some are hidden behind env flags):
 | Nested AGENTS.md attach-on-read | shipped | `session/instruction.ts:179-221` |
 | Structured output (JSON schema per message) | shipped | `session/prompt.ts:1242-1248` |
 
-Recommended baseline env for this fork's users:
+Fork defaults (on out of the box, no env setup needed):
+
+- **LSP tool** — opt out with `OPENCODE_DISABLE_LSP_TOOL`
+- **Web search** (all providers) — opt out with `OPENCODE_DISABLE_WEBSEARCH`
+- **Background subagents** (+ task background/output_schema/isolation params) —
+  opt out with `OPENCODE_DISABLE_BACKGROUND_SUBAGENTS`
+- **Tool-output pruning** (`compaction.prune`) — opt out with config
+  `compaction.prune: false`
+- **Question tool** — already on for the CLI/app/desktop clients upstream
+
+Still opt-in (an interaction *mode*, enable per your preference):
 
 ```sh
-export OPENCODE_EXPERIMENTAL_PLAN_MODE=true
-export OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true
-export OPENCODE_ENABLE_QUESTION_TOOL=true
-# LSP tool and websearch are on by default in this fork
-# (OPENCODE_DISABLE_LSP_TOOL / OPENCODE_DISABLE_WEBSEARCH opt out).
-```
-
-and in `opencode.json`:
-
-```json
-{ "compaction": { "prune": true } }
+export OPENCODE_EXPERIMENTAL_PLAN_MODE=true   # plan-mode v2 for the plan agent
 ```
 
 ---
