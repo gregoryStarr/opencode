@@ -6,6 +6,9 @@ import { ProviderTransform } from "@/provider/transform"
 import type { MessageV2 } from "./message-v2"
 
 const COMPACTION_BUFFER = 20_000
+// Fork: compact before the hard ceiling so the compaction request itself has
+// headroom and quality does not degrade right at the limit.
+const DEFAULT_THRESHOLD = 0.9
 
 export function usable(input: { cfg: ConfigV1.Info; model: Provider.Model; outputTokenMax?: number }) {
   const context = input.model.limit.context
@@ -30,5 +33,6 @@ export function isOverflow(input: {
 
   const count =
     input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-  return count >= usable(input)
+  const threshold = input.cfg.compaction?.threshold ?? DEFAULT_THRESHOLD
+  return count >= usable(input) * threshold
 }
