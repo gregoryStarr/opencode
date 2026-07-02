@@ -55,11 +55,14 @@ import { eq } from "drizzle-orm"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
+import { Todo } from "./todo"
+import PROMPT_PRINCIPLES from "./prompt/principles.txt"
 import { LLMEvent } from "@opencode-ai/llm"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
 
+const INTERNAL_AGENTS = new Set(["compaction", "title", "summary"])
 const decodeMessageInfo = Schema.decodeUnknownExit(SessionV1.Info)
 const decodeMessagePart = Schema.decodeUnknownExit(SessionV1.Part)
 const MAX_MCP_RESOURCE_BLOB_BYTES = 10 * 1024 * 1024
@@ -140,6 +143,7 @@ const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
+    const todos = yield* Todo.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
@@ -1181,6 +1185,7 @@ const layer = Layer.effect(
             Effect.provideService(RuntimeFlags.Service, flags),
             Effect.provideService(FSUtil.Service, fsys),
             Effect.provideService(Session.Service, sessions),
+            Effect.provideService(Todo.Service, todos),
           )
 
           const msg: SessionV1.Assistant = {
@@ -1261,6 +1266,7 @@ const layer = Layer.effect(
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
             const system = [
+              ...(flags.disableSharedPrinciples || INTERNAL_AGENTS.has(agent.name) ? [] : [PROMPT_PRINCIPLES]),
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
@@ -1624,6 +1630,7 @@ export const node = LayerNode.make({
     EventV2Bridge.node,
     RuntimeFlags.node,
     Database.node,
+    Todo.node,
   ],
 })
 

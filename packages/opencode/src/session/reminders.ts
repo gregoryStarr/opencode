@@ -11,6 +11,7 @@ import { Session } from "./session"
 import PROMPT_PLAN from "./prompt/plan.txt"
 import BUILD_SWITCH from "./prompt/build-switch.txt"
 import PLAN_MODE from "./prompt/plan-mode.txt"
+import { Todo } from "./todo"
 
 export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   messages: SessionV1.WithParts[]
@@ -20,8 +21,29 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   const flags = yield* RuntimeFlags.Service
   const fsys = yield* FSUtil.Service
   const sessions = yield* Session.Service
+  const todo = yield* Todo.Service
   const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
   if (!userMessage) return input.messages
+
+  // Re-surface the current todo list each turn so it doesn't decay out of the
+  // model's attention as the conversation grows.
+  const todos = yield* todo.get(userMessage.info.sessionID)
+  if (todos.length > 0 && todos.some((item) => item.status !== "completed")) {
+    userMessage.parts.push({
+      id: PartID.ascending(),
+      messageID: userMessage.info.id,
+      sessionID: userMessage.info.sessionID,
+      type: "text",
+      text: [
+        "<system-reminder>",
+        "Current todo list:",
+        ...todos.map((item) => `- [${item.status}] ${item.content}`),
+        "Keep working through it and update statuses with the todowrite tool as you finish items. Do not mention this reminder to the user.",
+        "</system-reminder>",
+      ].join("\n"),
+      synthetic: true,
+    })
+  }
 
   if (!flags.experimentalPlanMode) {
     if (input.agent.name === "plan") {
