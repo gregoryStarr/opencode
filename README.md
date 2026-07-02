@@ -61,26 +61,26 @@ bun install
 bun run dev
 ```
 
-To get a global `opencode` command that tracks your local checkout:
+The command is `gcode` (this fork renames the CLI from `opencode`). To get a global `gcode` command that tracks your local checkout:
 
 ```bash
 bun link --cwd packages/opencode
-opencode        # now runs this fork
+gcode           # now runs this fork
 ```
 
 Or build a standalone binary for your platform:
 
 ```bash
 bun run --cwd packages/opencode build
-# → packages/opencode/dist/<platform>/bin/opencode
+# → packages/opencode/dist/<platform>/bin/gcode
 # copy it somewhere on your PATH, e.g.:
-cp packages/opencode/dist/*/bin/opencode ~/.local/bin/opencode
+cp packages/opencode/dist/*/bin/gcode ~/.local/bin/gcode
 ```
 
 **Staying current:** this fork tracks upstream on the `dev` branch. Pull updates with `git pull && bun install`.
 
-> [!TIP]
-> If you previously installed upstream opencode, its binary may shadow this one — check `which opencode` and adjust your PATH so the fork wins.
+> [!NOTE]
+> The command is `gcode`, but config paths are unchanged (`~/.config/opencode`, `opencode.json`) so existing setups keep working. If you also have upstream opencode installed, the two commands coexist.
 
 ### Desktop App (BETA)
 
