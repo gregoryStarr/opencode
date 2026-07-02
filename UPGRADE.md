@@ -9,6 +9,14 @@ Baseline: upstream `anomalyco/opencode` v1.17.13 (synced 2026-07-02).
 All findings below were verified against that tree; paths are relative to
 `packages/opencode/src/`.
 
+**Status: complete — all phases merged into `dev`** (PRs #1, #2, #3, 2026-07-02),
+live-validated end-to-end against `ollama-cloud/kimi-k2.7-code`. The section
+headings below say "shipped on this branch" for historical accuracy; read them
+as "merged to dev." User-facing docs are updated in
+`packages/web/src/content/docs/` (config, tools, agents, rules). The only
+remaining architectural gap is hard-forcing bash cwd inside isolated worktrees
+(Phase 3.4 note).
+
 ---
 
 ## Live validation (2026-07-02, `ollama-cloud/kimi-k2.7-code`)

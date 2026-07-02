@@ -729,15 +729,48 @@ You can control context compaction behavior through the `compaction` option.
   "$schema": "https://opencode.ai/config.json",
   "compaction": {
     "auto": true,
-    "prune": false,
+    "prune": true,
+    "threshold": 0.9,
     "reserved": 10000
   }
 }
 ```
 
 - `auto` - Automatically compact the session when context is full (default: `true`).
-- `prune` - Remove old tool outputs to save tokens (default: `false`). Set to `true` to enable pruning.
+- `prune` - Remove old tool outputs to save tokens (default: `true` in this build; set to `false` to opt out). Keeps context lean, which matters most for smaller/local models.
+- `threshold` - Fraction of the usable context window at which auto-compaction triggers (default: `0.9`). Lower values compact earlier, leaving more headroom for the compaction request itself. Floored at `0.5` at runtime — values below that compact so aggressively that the post-compaction turn re-triggers compaction in a loop.
 - `reserved` - Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
+
+Compaction also pulls the current todo list from the session's todo store into the summary prompt, so open work survives the compaction boundary even if the `todowrite` tool outputs were pruned out of history.
+
+---
+
+### Hooks
+
+Run shell commands on tool calls and bus events without writing a plugin. Each hook command receives a JSON payload describing the event on **stdin**.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "hooks": {
+    "tool.execute.before": [
+      { "command": "./scripts/guard-edits.sh", "matcher": "^(edit|write)$" }
+    ],
+    "tool.execute.after": [
+      { "command": "./scripts/lint-changed.sh", "matcher": "^edit$", "timeout": 30000 }
+    ],
+    "event": [
+      { "command": "./scripts/notify.sh", "matcher": "session.idle" }
+    ]
+  }
+}
+```
+
+- `tool.execute.before` - Runs before a tool executes. **Exit code `2` blocks the tool call** and feeds the hook's stderr back to the model; any other non-zero exit is logged without blocking.
+- `tool.execute.after` - Runs after a tool executes. The hook's **stdout is appended** to the tool output the model sees.
+- `event` - Runs on bus events (e.g. session lifecycle). Fire-and-forget; the matcher is applied to the event type.
+
+Per hook: `command` (required), `matcher` (optional regex against the tool id or event type; omit to match everything), and `timeout` (optional ms, default `60000`).
 
 ---
 
