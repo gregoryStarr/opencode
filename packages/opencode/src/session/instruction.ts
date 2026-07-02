@@ -119,6 +119,16 @@ const layer: Layer.Layer<
         }
       }
 
+      // Persistent cross-session memory: a global MEMORY.md plus a per-project
+      // one, maintained by the model itself via ordinary edit/write tools.
+      const memoryFiles = [
+        path.join(global.config, "MEMORY.md"),
+        ...(!Flag.OPENCODE_DISABLE_PROJECT_CONFIG ? [path.join(ctx.worktree, ".opencode", "MEMORY.md")] : []),
+      ]
+      for (const file of memoryFiles) {
+        if (yield* fs.existsSafe(file)) paths.add(path.resolve(file))
+      }
+
       // The first project-level match wins so we don't stack AGENTS.md/CLAUDE.md from every ancestor.
       if (!Flag.OPENCODE_DISABLE_PROJECT_CONFIG) {
         for (const file of instructionFiles) {
